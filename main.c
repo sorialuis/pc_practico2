@@ -12,15 +12,13 @@
 #include <sys/mman.h>
 #include "structs.h"
 //Esto va a estar aspero!
-//Cristian Puto
 
 //Encargado es un procceso que administra los hilos cocineros
+//Calle es un proceso que lanza hilos del tipo cliente
 
-//Calle es un proceso que lanza hilos del tipo calle
-
-//Calle es un hilo
-
-//Cocinero es un hilo
+//Process Cocineros que larga los hilos cocinero
+//Cliente es un hilo que paga con a travez de FIFO
+//Cocinero es un hilo informa por cola de mensajes al encargado
 
 #define COCINEROS 3
 #define CLIENTES 50
@@ -34,8 +32,10 @@ void *clientThread(void *);
 void *chefThread(void *);
 
 /* Process functions */
-void *streetProcess(FoodPlace *);
-void *chefsProcess(void *);
+void streetProcess(FoodPlace *);
+void chefsProcess(FoodPlace *);
+void managerProcess(FoodPlace *);
+
 
 /* FoodMenu Functions */
 Food *menuSetup();
@@ -46,6 +46,11 @@ int main() {
     printf("Hello, World!\n");
     int error=0, pid=0, childError=0, childPid=0;
 
+    //Func crear structs
+    //Func crear compartido
+
+
+
     pid = fork();
     if (pid == 0) {
         Encargado();
@@ -53,10 +58,10 @@ int main() {
     else if (pid > 0) {
         childPid = fork();
         if(childPid == 0){
-            Cocineros();
+            chefsProcess(mercadoChino);
         }
         else if (childPid > 0){
-            Calle();
+            streetProcess(mercadoChino);
         }
         else{
             perror("fork2()");
@@ -68,7 +73,7 @@ int main() {
     return 0;
 }
 
-void *streetProcess(FoodPlace *mercadoChino){
+void streetProcess(FoodPlace *mercadoChino){
     placeOpen = 1;
     int tolerance = getMaxWaitTime(mercadoChino->menu);
     int aux = 0;
@@ -96,9 +101,24 @@ void *streetProcess(FoodPlace *mercadoChino){
         mercadoChino->clientsTotal = aux;
     }
 
-    printf("Cerrando hilo calle");
+    printf("Cerrando proceso calle");
 
     pthread_exit(NULL);
+}
+
+void chefsProcess(FoodPlace *mercadoChino){
+    pthread_t *chefThreads = (pthread_t *)calloc(COCINEROS,sizeof(pthread_t));
+    for(int i = 0; i < COCINEROS; i++){
+    mercadoChino->chefs[i].id = i;
+    *mercadoChino->chefs[i].libre = 1;
+    //ver si tiene mutex
+    pthread_create(&chefThreads[i],NULL,chefThreads,&mercadoChino->chefs[i]);
+    }
+
+    for(i = 0; i < COCINEROS; i++) {
+        pthread_join(&mercadoChino->chefs[i], NULL);
+    }
+
 }
 
 void *clientThread(void *arg){
@@ -215,3 +235,5 @@ int getMaxWaitTime(Food *menu){
             max = menu[i].prepTime;
     return max * 4;
 }
+
+
