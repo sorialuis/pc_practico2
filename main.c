@@ -404,7 +404,6 @@ int initShared(FoodPlace *mercadoChino){
     pthread_mutex_unlock(&datos->mtxClientQueue);
 
 
-    /*Creo la fifo*/
 
     //Crear la fifo!
     error = mkfifo("/tmp/fifo", 0777);
