@@ -193,11 +193,20 @@ void chefsProcess(FoodPlace *mercadoChino){
 void managerProcess(FoodPlace *mercadoChino){
     int error = 0;
     Compartido *datos;
+    //Memoria compartida
     datos = mmap(NULL, sizeof(Compartido), PROT_READ | PROT_WRITE, MAP_SHARED, mercadoChino->memoriaCompartida, 0);
     if (datos == MAP_FAILED) {
         perror("mmap()");
         error = -1;
     }
+    //Fifo de lectura
+    int fifoOut = 0;
+    fifoOut = open("/tmp/fifo", O_WRONLY);
+    if(fifoOut < 0) {
+        perror("fifo open");
+    }
+
+
 
     char *status;
     int i;
