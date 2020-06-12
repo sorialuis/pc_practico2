@@ -18,23 +18,34 @@ typedef struct{
     pthread_mutex_t *mtxClientQueue;
 }Client;
 
-typedef struct{
-    int id;
-    int *libre;
-    pthread_mutex_t *mtx;
-}Chef;
+
 
 typedef struct{
 
 }Manager;
 
 typedef struct{
+    int idCliente;
+    Food orden;
+}Pedido;
+
+typedef struct{
+    int id;
+    int *libre;
+    pthread_mutex_t *mtx;
+    Pedido pedido;
+}Chef;
+
+typedef struct{
     int libre[COCINEROS];
+    Pedido asignado[COCINEROS];
     pthread_mutex_t mtx;
     pthread_mutex_t mtxClientQueue;
     int clientTolerance[CLIENTES];
     int clientsTotal;
+    int placeOpen, finished;
 }Compartido;
+
 
 typedef struct{
     int memoriaCompartida;

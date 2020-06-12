@@ -31,7 +31,7 @@
 /* Variables globales para la alarma */
 int placeOpen, finished;
 
-void startGame(FoodPlace *, pthread_t);
+int welcomeMenu();
 
 /* Thread functions */
 void *clientThread(void *);
@@ -54,7 +54,10 @@ void destroyShared(FoodPlace *);
 
 /* Close */
 void closeFoodPlace();
+void closeDoor(int);
+
 void clearScreen();
+
 
 int main() {
 
@@ -73,54 +76,43 @@ int main() {
 
 
     int opt;
-    while (!finished){
-        scanf("%d",&opt);
-        /*El switch es feo... lo cambiamos ?*/
-        switch (opt) {
-            case 1:
-                startGame(params->mercadoChino,params->sThread);
-                break;
-            case 2:
-                serveClient(params->mercadoChino);
-                break;
-            case 3:
-                deliverOrder(params->mercadoChino);
-                break;
-            case 4:
-                closeFoodPlace(params->mercadoChino->m);
-                break;
-            default:
-                printf("OPCION INCORRECTA");
+    opt = welcomeMenu();
+    if(opt == 1){
+        pid = fork();
+        if (pid == 0) {
+//            printf(" \n");
+            managerProcess(mercadoChino);
         }
-        fflush(stdin);
+        else if (pid > 0) {
+            childPid = fork();
+            if(childPid == 0){
+                chefsProcess(mercadoChino);
+            }
+            else if (childPid > 0){
+                streetProcess(mercadoChino);
+            }
+            else{
+                perror("fork2()");
+            }
+        }
+        else {
+            perror("fork()");
+        }
     }
 
-    pid = fork();
-    if (pid == 0) {
-        managerProcess(mercadoChino);
-    }
-    else if (pid > 0) {
-        childPid = fork();
-        if(childPid == 0){
-            chefsProcess(mercadoChino);
-        }
-        else if (childPid > 0){
-            streetProcess(mercadoChino);
-        }
-        else{
-            perror("fork2()");
-        }
-    }
-    else {
-        perror("fork()");
-    }
-    sleep(10);
+    sleep(2);
 //    printf("Hola\n");
 //    sleep(10);
     return 0;
 }
 
 void streetProcess(FoodPlace *mercadoChino){
+
+    /* Setear alarma de fin */
+    signal(SIGALRM, closeDoor);
+    alarm(60);
+
+    //Datos compartidos
     int error = 0;
     Compartido *datos;
     datos = mmap(NULL, sizeof(Compartido), PROT_READ | PROT_WRITE, MAP_SHARED, mercadoChino->memoriaCompartida, 0);
@@ -129,9 +121,9 @@ void streetProcess(FoodPlace *mercadoChino){
         error = -1;
     }
 
+
     placeOpen = 1;
     int tolerance = getMaxWaitTime(mercadoChino->menu);
-
     int aux = 0;
     while(placeOpen && aux < CLIENTES){
         pthread_t *cThread = (pthread_t *) calloc(1,sizeof(pthread_t));
@@ -139,6 +131,7 @@ void streetProcess(FoodPlace *mercadoChino){
         client->id = aux++;
         client->tolerance = (int*)calloc(1,sizeof(int));
 //        client->split = (SplitSemaphore_t*)calloc(1,sizeof(SplitSemaphore_t));
+
         datos->clientTolerance[aux] = tolerance;
         *client->tolerance = datos->clientTolerance[aux];
         client->order = pickFood(mercadoChino->menu);
@@ -153,9 +146,10 @@ void streetProcess(FoodPlace *mercadoChino){
 //        mercadoChino->clients[client->id] = *client;
 
         sleep(rand()%5+1);
+        datos->clientsTotal = aux;
         printf(" \n");
         pthread_create(cThread,NULL,clientThread,(void*)client);
-        datos->clientsTotal = aux;
+
     }
     pthread_exit(NULL);
 }
@@ -192,26 +186,27 @@ void chefsProcess(FoodPlace *mercadoChino){
 
 void managerProcess(FoodPlace *mercadoChino){
     int error = 0;
-    Compartido *datos;
+    int opt = 0;
+    int i= 0;
+    char *status;
+
     //Memoria compartida
+    Compartido *datos;
     datos = mmap(NULL, sizeof(Compartido), PROT_READ | PROT_WRITE, MAP_SHARED, mercadoChino->memoriaCompartida, 0);
     if (datos == MAP_FAILED) {
         perror("mmap()");
         error = -1;
     }
+
     //Fifo de lectura
     int fifoOut = 0;
-    fifoOut = open("/tmp/fifo", O_WRONLY);
+    fifoOut = open("./fifo", O_RDONLY);
     if(fifoOut < 0) {
         perror("fifo open");
     }
 
-
-
-    char *status;
-    int i;
-
-    while(!finished){
+    //Menu del Juego
+    while (!finished){
         clearScreen();
         printf("Puerta: %s\n\n", placeOpen ? "ABIERTA" : "CERRADA");
 
@@ -224,6 +219,7 @@ void managerProcess(FoodPlace *mercadoChino){
         }
         //Esto lo tendria que ver con la FIFO
         printf("\nClientes en cola:\n");
+        printf("%d",datos->clientsTotal);
         for(i = 0; i < datos->clientsTotal; i++ ){
             if(datos->clientTolerance[i]){
                 printf("\tCliente %d pedido.\n",i);
@@ -233,35 +229,58 @@ void managerProcess(FoodPlace *mercadoChino){
         //Ver de contar fifo
 //        printf("\nPedidos Terminados: %d\n",
 //               *params->mercadoChino->m->lista_terminados->cant);
-        printf("\nGanancias: $%d\n",*datos);
+//        printf("\nGanancias: $%d\n",*datos);
         printf("\nAcciones:\n");
-        printf("\t1 - Iniciar Juego\n");
-        printf("\t2 - Atender Cliente\n");
-        printf("\t3 - Entregar Pedido\n");
-        printf("\t4 - Cerrar Local\n");
+        printf("\t1 - Atender Cliente\n");
+        printf("\t2 - Entregar Pedido\n");
+        printf("\t3 - Cerrar Local\n");
         printf("\nIngrese una opcion: \n");
-
+        opt = 0;
+        scanf("%d",&opt);
+        /*El switch es feo... lo cambiamos ?*/
+        switch (opt) {
+            case 1:
+//                serveClient(params->mercadoChino);
+                printf("Opcion1\n");
+                break;
+            case 2:
+//                deliverOrder(params->mercadoChino);
+                printf("Opcion2\n");
+                break;
+            case 3:
+//                closeFoodPlace(params->mercadoChino->m);
+                closeFoodPlace();
+                printf("Opcion3\n");
+                break;
+            default:
+                printf("OPCION INCORRECTA");
+        }
+        fflush(stdin);
         sleep(2);
     }
+    close(fifoOut);
     pthread_exit(NULL);
 }
 
 void *clientThread(void *arg){
     Client *client = (Client *)arg;
-
-//    int *datos=NULL;
-//    int mem = *client->memoria;
-//    datos = mmap(NULL, sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED, mem, 0);
+    char strnum[20];
+    int guardado;
 
     printf("Nuevo cliente en cola");
-//
-//
+
+    //Canal de envio de FIFO
+    int fifoIn = 0;
+    fifoIn = open("./fifo", O_WRONLY);
+    if(fifoIn < 0) {
+        perror("fifo open");
+    }
+
     struct timespec wait;
     clock_gettime(CLOCK_REALTIME, &wait);
     wait.tv_sec += *client->tolerance;
-//
     int errCode = pthread_mutex_timedlock(client->mtxClientQueue, &wait);
-//
+
     if(!errCode){
         *client->tolerance = 0;
 //        IngresarPedido(client->m, *client->order);
@@ -274,6 +293,16 @@ void *clientThread(void *arg){
 //        sem_post(client->split->cobrar);
 
 
+        //Envio el valor de la comida al encargado
+        sprintf(strnum,"%d", client->order->value);
+        guardado = write(fifoIn,strnum,6);
+        if(guardado < 0){
+            perror("Fifo Escritura\n");
+        }
+
+
+
+
     } else{
         printf("El Cliente %d se canso de esperar\r\n",client->id);
         *client->tolerance = 0;
@@ -282,7 +311,7 @@ void *clientThread(void *arg){
 
 
 
-
+    close(fifoIn);
 //    free(client);
     pthread_exit(NULL);
 
@@ -291,8 +320,15 @@ void *clientThread(void *arg){
 void *chefThread(void *arg){
     Chef *chef = (Chef *)arg;
 
-    Food comida;
-//
+    //abrir la cola de mensajes
+    mqd_t cola;
+    int error = 0;
+    cola=mq_open("/colaMensajes",O_WRONLY|O_CREAT,0660,NULL);
+    if (cola==-1) {
+        error=cola;
+        perror("mq_open");
+    }
+
 //    printf("Soy el chef %d bloqueando\n",chef->id);
 //    pthread_mutex_unlock(chef->mtx);
 //    printf("Soy el chef %d desbloqueando\n",chef->id);
@@ -300,14 +336,21 @@ void *chefThread(void *arg){
 //
 
     while(!finished){
-        finished = 1;
 //        SacarPedido(chef->m,&comida);
 //        *chef->libre = 0;
-//        sleep(comida.prepTime);
+        sleep(chef->pedido.orden.prepTime);
 //        IngresarComida(chef->m,comida);
 //        *chef->m->lista_terminados->cant = *chef->m->lista_terminados->cant + 1;
 //        pthread_mutex_unlock(chef->mtx);
 //        *chef->libre = 1;
+
+        char idCliente[5];
+        int enviado = 0;
+        snprintf(idCliente,4,"%d",chef->pedido.idCliente);
+        enviado = mq_send(cola,idCliente,4,0);
+        if(enviado == -1) {
+            perror("Cola envio error");
+        }
     }
 
 //    free(chef);
@@ -415,7 +458,7 @@ int initShared(FoodPlace *mercadoChino){
 
 
     //Crear la fifo!
-    error = mkfifo("/tmp/fifo", 0777);
+    error = mkfifo("./fifo", 0777);
     if((error < 0) && (errno != EEXIST)) {
         perror("mkfifo");
     }
@@ -435,6 +478,7 @@ int initShared(FoodPlace *mercadoChino){
 
 void destroyShared(FoodPlace *mercadoChino){
     int error = 0;
+    int fifo;
 
     //Cerrar memoria compartida
     error = shm_unlink("/memCompartida");
@@ -446,7 +490,10 @@ void destroyShared(FoodPlace *mercadoChino){
     }
 
     //Cerrar fifo
-    error = unlink("/tmp/fifo");
+    fifo = unlink("./fifo");
+    if (fifo) {
+        perror("unlinkFIFO!");
+    }
 
     //Cerrra cola de mensajes
     if(!access("/colaMensajes", F_OK)) {
@@ -460,7 +507,6 @@ void destroyShared(FoodPlace *mercadoChino){
 }
 
 void closeFoodPlace(){
-    placeOpen = 0;
     finished = 1;
 }
 
@@ -469,13 +515,20 @@ void clearScreen(){
     system("clear");
 }
 
-void startGame(FoodPlace *mercadoChino, pthread_t sThread){
-    /*Si el juego no esta iniciado, Ejecutar la calle*/
+int welcomeMenu(){
+    int opt = 0;
+    do {
+//        clearScreen();
+        printf("Juego Programacion Concurrente\n");
+        printf("1 - Iniciar juego\n");
+        printf("2 -  Salir\n");
+        printf("Ingrese una opcion: ");
+        scanf("%d", &opt);
+    } while(opt < 1 || opt > 2);
 
-    printf("\nJuego Iniciado\n");
-    pthread_create(&sThread,NULL,streetThread,(void *)mercadoChino);
+    return opt;
+}
 
-    /* Setear alarma de fin */
-    signal(SIGALRM, closeDoor);
-    alarm(60);
+void closeDoor(int sigCode){
+    placeOpen = 0;
 }
