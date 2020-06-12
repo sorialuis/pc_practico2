@@ -43,6 +43,8 @@ typedef struct{
     Food *currentOrder;
     Chef *chefs;
     int open;
+    int fifo;
+    mqd_t colaMensajes;
 //    pthread_mutex_t *mtx;
 }FoodPlace;
 

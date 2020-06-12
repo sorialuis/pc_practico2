@@ -5,12 +5,16 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <semaphore.h>
-#include <unistd.h>
 #include <time.h>
 #include <sys/wait.h>
 #include <sys/types.h>
 #include <sys/mman.h>
+#include <errno.h>
+#include <sys/stat.h>
+#include <mqueue.h>
 #include "structs.h"
+
+
 //Esto va a estar aspero!
 
 //gcc -pthread  main.c -lrt
@@ -90,8 +94,6 @@ int main() {
         }
         fflush(stdin);
     }
-
-
 
     pid = fork();
     if (pid == 0) {
@@ -232,10 +234,6 @@ void managerProcess(FoodPlace *mercadoChino){
 
         sleep(2);
     }
-
-
-
-
     pthread_exit(NULL);
 }
 
@@ -404,16 +402,52 @@ int initShared(FoodPlace *mercadoChino){
 
     pthread_mutex_init(&datos->mtxClientQueue, &mtxa2);
     pthread_mutex_unlock(&datos->mtxClientQueue);
+
+
+    /*Creo la fifo*/
+
+    //Crear la fifo!
+    error = mkfifo("/tmp/fifo", 0777);
+    if((error < 0) && (errno != EEXIST)) {
+        perror("mkfifo");
+    }
+    else {
+        error = 0;
+    }
+
+    //Crear Colar de mensajes
+    mercadoChino->colaMensajes = mq_open("/colaMensajes", O_RDWR | O_CREAT, 0777, NULL);
+    if (mercadoChino->colaMensajes == -1) {
+        perror("mq_open");
+        error = mercadoChino->colaMensajes;
+    }
+
+    return error;
 }
 
 void destroyShared(FoodPlace *mercadoChino){
     int error = 0;
+
+    //Cerrar memoria compartida
     error = shm_unlink("/memCompartida");
     if (error) {
         perror("unlink()");
     }
     else {
         printf("Descriptor de memoria borrado!\n");
+    }
+
+    //Cerrar fifo
+    error = unlink("/tmp/fifo");
+
+    //Cerrra cola de mensajes
+    if(!access("/colaMensajes", F_OK)) {
+        mercadoChino->colaMensajes = mq_close(mercadoChino->colaMensajes);
+        if(mercadoChino->colaMensajes)
+            perror("mq_close");
+        mercadoChino->colaMensajes = mq_unlink("/colaMensajes");
+        if(mercadoChino->colaMensajes)
+            perror("mq_close");
     }
 }
 
