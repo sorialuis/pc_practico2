@@ -268,7 +268,7 @@ void *menuThread(void *arg){
     while (!finished){
         mq_getattr(cola,&attrCola);
 //        clearScreen();
-        printf("Puerta: %s\n\n", placeOpen ? "ABIERTA" : "CERRADA");
+        printf("Puerta: %s\n\n", placeOpen ? "CERRADA" : "ABIERTA");
         printf("Estados de Cocineros:\n");
         for(i = 0; i < COCINEROS; i++ ){
             if(datos->compartido->libre[i]){
@@ -284,7 +284,6 @@ void *menuThread(void *arg){
                 printf("\tCliente %d pedido %s.\n",i, datos->compartido->clientes[i].order->name);
             }
         }
-
 
         //Ver de contar fifo
         printf("\nPedidos Terminados esperando cobrar: %ld\n",
@@ -340,7 +339,7 @@ void *clientThread(void *arg){
 
 void *chefThread(void *arg){
     Chef *chef = (Chef *)arg;
-    char idCliente[5];
+    char idCliente[10];
     *chef->libre = 1;
     int enviado = 0;
     //abrir la cola de mensajes
@@ -366,7 +365,7 @@ void *chefThread(void *arg){
 //        Envio por cola de mensajes
         snprintf(idCliente,10,"%d",chef->pedido->idCliente);
         printf("ID CLIENTE %s\n",idCliente);
-        enviado = mq_send(cola,idCliente,TAMMSG,0);
+        enviado = mq_send(cola,idCliente,10,0);
         if(enviado == -1) {
             perror("Cola envio error");
         }
