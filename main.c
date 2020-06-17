@@ -3,10 +3,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <fcntl.h>
-#include <signal.h>
-#include <semaphore.h>
 #include <time.h>
-#include <sys/wait.h>
 #include <sys/types.h>
 #include <sys/mman.h>
 #include <errno.h>
@@ -17,9 +14,6 @@
 //gcc -pthread  main.c -lrt
 
 #define TAMMSG 8192
-/* Variables globales para la alarma */
-int placeOpen, finished;
-
 
 int welcomeMenu();
 
@@ -44,18 +38,13 @@ int initShared(FoodPlace *);
 void destroyShared(FoodPlace *);
 
 void serveClient(Compartido *);
-int deliverOrder();
-
-/* Close */
-void closeFoodPlace();
-void closeDoor(int);
 
 void clearScreen();
 int chefDesocupado(Compartido *);
 
-
 int main() {
-    int error=0, pid=0, childError=0, childPid=0;
+    srand(time(NULL));
+    int pid=0, childPid=0;
 
     FoodPlace *mercadoChino = (FoodPlace *)calloc(1,sizeof(FoodPlace));
     mercadoChino->chefs = (Chef*)calloc(COCINEROS,sizeof(Chef));
@@ -69,7 +58,6 @@ int main() {
     if(opt == 1){
         pid = fork();
         if (pid == 0) {
-//            printf(" \n");
             managerProcess(mercadoChino);
         }
         else if (pid > 0) {
@@ -95,10 +83,6 @@ int main() {
 }
 
 void streetProcess(FoodPlace *mercadoChino){
-    /* Setear alarma de fin */
-    signal(SIGALRM, closeDoor);
-    alarm(60);
-
     //Datos compartidos
     int error = 0;
     Compartido *datos;
@@ -108,28 +92,23 @@ void streetProcess(FoodPlace *mercadoChino){
         error = -1;
     }
 
-    placeOpen = 1;
     int tolerance = getMaxWaitTime(mercadoChino->menu);
     int aux = 0;
-    while(placeOpen && aux < CLIENTES){
+    while(datos->placeOpen && aux < CLIENTES){
         pthread_t *cThread = (pthread_t *) calloc(1,sizeof(pthread_t));
 
         datos->clientes[aux].id = aux;
-
-
         datos->clientes[aux].tolerance = tolerance;
         datos->clientes[aux].order = pickFood(mercadoChino->menu);
-
         datos->clientes[aux].mtxClientQueue = &datos->mtxClientQueue;
         datos->clientes[aux].mtxEsperarPedido = &datos->mtxEsperaPedido;
-
 
         sleep(rand()%5+1);
 
         pthread_create(cThread,NULL,clientThread,(void*)&datos->clientes[aux]);
         datos->clientsTotal = ++aux;
     }
-    pthread_exit(NULL);
+
 }
 
 void chefsProcess(FoodPlace *mercadoChino){
@@ -143,21 +122,14 @@ void chefsProcess(FoodPlace *mercadoChino){
     Chef chef[COCINEROS];
     pthread_t *chefThreads = (pthread_t *)calloc(COCINEROS,sizeof(pthread_t));
     for(int i = 0; i < COCINEROS; i++){
-//        printf("chefsProcess %d\n",i);
-//        mercadoChino->chefs[i].id = i;
-//       *mercadoChino->chefs[i].libre = 1;
-//
-//        //ver si tienen mutex
-//          printf("Creando el hilo del cheff %d\n", i);
-//        mercadoChino->chefs[i].mtx = mercadoChino->mtx;
-//        pthread_create(&chefThreads[i],NULL,chefThread,&mercadoChino->chefs[i]);
+
         chef[i].id = i;
         chef[i].mtx = &datos->mtx[i];
-//        pthread_mutex_unlock(&datos->mtx[i]);
         chef[i].mtxEsperarPedido = &datos->mtxEsperaPedido;
         chef[i].libre = &datos->libre[i];
         *chef[i].libre = 1;
         chef[i].pedido = &datos->asignado[i];
+        chef[i].placeOpen = &datos->placeOpen;
         pthread_create(&chefThreads[i],NULL,chefThread,&chef[i]);
     }
     for(int i = 0; i < COCINEROS; i++) {
@@ -166,9 +138,7 @@ void chefsProcess(FoodPlace *mercadoChino){
 }
 
 void managerProcess(FoodPlace *mercadoChino){
-
     struct mq_attr attrCola;
-//    mqd_t cola = mq_open("/colaMensajes",O_RDONLY);
     mqd_t cola = mq_open("/colaMensajes",O_RDONLY,0664,&attrCola);
     if(cola == -1){
         perror("mq_open managerProcess");
@@ -187,17 +157,16 @@ void managerProcess(FoodPlace *mercadoChino){
     params.ganancia = (int *)calloc(1,sizeof(int));
     params.pedidosTerminados = (int *)calloc(1,sizeof(int));
 
-
     //Memoria compartida
     Compartido *datos;
     datos = mmap(NULL, sizeof(Compartido), PROT_READ | PROT_WRITE, MAP_SHARED, mercadoChino->memoriaCompartida, 0);
     if (datos == MAP_FAILED) {
         perror("mmap()");
     }
+    params.placeOpen = &datos->placeOpen;
 
     //Fifo de lectura
     int mififo = open("./fifo",O_RDONLY);
-
 
     params.compartido = datos;
     params.ganancia = &ganancias;
@@ -205,7 +174,7 @@ void managerProcess(FoodPlace *mercadoChino){
     pthread_create(&menu,NULL,menuThread,(void *)&params);
 
     //Menu del Juego
-    while (!finished){
+    while (datos->placeOpen){
         opt = 0;
         scanf("%d",&opt);
         if(opt == 1){
@@ -230,13 +199,12 @@ void managerProcess(FoodPlace *mercadoChino){
                 printf("Sin clientes para cobrar\n");
             }
         }else if(opt == 3){
+            datos->placeOpen = 0;
             //cerrar
         }else {
             printf("OPCION INCORRECTA\n");
             printf("%d\n",opt);
         }
-
-
         fflush(stdin);
     }
     close(mififo);
@@ -251,10 +219,10 @@ void *menuThread(void *arg){
     int i= 0;
     char *status;
 
-    while (!finished){
+    while (*datos->placeOpen){
         mq_getattr(cola,&attrCola);
         clearScreen();
-        printf("Puerta: %s\n\n", placeOpen ? "CERRADA" : "ABIERTA");
+        printf("Puerta: %s\n\n", *datos->placeOpen ? "ABIERTA" : "CERRADA");
         printf("Estados de Cocineros:\n");
         for(i = 0; i < COCINEROS; i++ ){
             if(datos->compartido->libre[i]){
@@ -291,7 +259,6 @@ void *clientThread(void *arg){
     char strnum[20];
     int guardado;
 
-
     //Canal de envio de FIFO
     int fifoIn = 0;
     fifoIn = open("./fifo", O_WRONLY);
@@ -317,9 +284,7 @@ void *clientThread(void *arg){
         client->tolerance = 0;
     }
     close(fifoIn);
-//    free(client);
     pthread_exit(NULL);
-
 }
 
 void *chefThread(void *arg){
@@ -336,10 +301,9 @@ void *chefThread(void *arg){
         perror("mq_open");
     }
 
-    while(!finished){
+    while(chef->placeOpen){
         pthread_mutex_lock(chef->mtx);
         *chef->libre = 0;
-        printf("Prep time %d\n",chef->pedido->order.prepTime);
         sleep(chef->pedido->order.prepTime);
         enviado = 0;
 //        Envio por cola de mensajes
@@ -352,7 +316,6 @@ void *chefThread(void *arg){
         *chef->libre = 1;
     }
 
-//    free(chef);
     pthread_exit(NULL);
 }
 
@@ -437,6 +400,8 @@ int initShared(FoodPlace *mercadoChino){
         perror("mmap()");
         error = -1;
     }
+
+    datos->placeOpen = 1;
     //Inicia el mutex compartido
     pthread_mutexattr_t mtxa[COCINEROS];
     for (int j = 0; j < COCINEROS; ++j) {
@@ -452,7 +417,6 @@ int initShared(FoodPlace *mercadoChino){
     pthread_mutexattr_init(&mtxa3);
     pthread_mutexattr_setpshared(&mtxa3, PTHREAD_PROCESS_SHARED);
 
-
     //Inicio mutex compartidos
     for (int i = 0; i < COCINEROS; ++i) {
         pthread_mutex_init(&datos->mtx[i], &mtxa[i]);
@@ -462,9 +426,8 @@ int initShared(FoodPlace *mercadoChino){
     pthread_mutex_init(&datos->mtxEsperaPedido, &mtxa2);
     pthread_mutex_lock(&datos->mtxEsperaPedido);
 
-
     pthread_mutex_init(&datos->mtxClientQueue, &mtxa3);
-    pthread_mutex_unlock(&datos->mtxClientQueue);
+    pthread_mutex_lock(&datos->mtxClientQueue);
 
     //Crear la fifo!
     error = mkfifo("./fifo", 0777);
@@ -512,10 +475,6 @@ void destroyShared(FoodPlace *mercadoChino){
 
 }
 
-void closeFoodPlace(){
-    finished = 1;
-}
-
 void clearScreen(){
 //    system("@cls||clear");
     system("clear");
@@ -535,12 +494,8 @@ int welcomeMenu(){
     return opt;
 }
 
-void closeDoor(int sigCode){
-    placeOpen = 0;
-}
-
 void serveClient(Compartido *datos){
-    int chef = -1;\
+    int chef = -1;
     chef = chefDesocupado(datos);
     if(chef >= 0){
         for(int i = 0; i < datos->clientsTotal; i++ ){
@@ -553,7 +508,6 @@ void serveClient(Compartido *datos){
             }
         }
     }
-    return;
 }
 
 int chefDesocupado(Compartido *datos){
@@ -564,14 +518,4 @@ int chefDesocupado(Compartido *datos){
         }
     }
     return libre;
-
-}
-
-int deliverOrder(int mififo){
-    char buf[50];
-    int numero = 0;
-    read(mififo,buf,sizeof(buf));
-    numero = atoi(buf);
-    close(mififo);
-    return numero;
 }

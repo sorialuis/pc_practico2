@@ -2,7 +2,7 @@
 #define PRACTICO2_STRUCTS_H
 
 #define COCINEROS 3
-#define CLIENTES 50
+#define CLIENTES 20
 
 typedef struct {
     char name[50];
@@ -19,12 +19,6 @@ typedef struct{
     pthread_mutex_t *mtxClientQueue;
 }Client;
 
-
-
-typedef struct{
-
-}Manager;
-
 typedef struct{
     int idCliente;
     Food order;
@@ -33,22 +27,20 @@ typedef struct{
 typedef struct{
     int id;
     int *libre;
+    int *placeOpen;
     pthread_mutex_t *mtx;
     pthread_mutex_t *mtxEsperarPedido;
-    //    pthread_mutex_t *mtxVenir;
     Pedido *pedido;
 }Chef;
 
 typedef struct{
     int libre[COCINEROS];
     Pedido asignado[COCINEROS];
-//    pthread_mutex_t mtxIngresar;
     pthread_mutex_t mtx[COCINEROS];
-//    pthread_mutex_t mtxVenir;
     pthread_mutex_t mtxClientQueue;
     Client clientes[CLIENTES];
     int clientsTotal;
-    int placeOpen, finished;
+    int placeOpen;
     pthread_mutex_t mtxEsperaPedido;
 }Compartido;
 
@@ -56,6 +48,7 @@ typedef struct {
     Compartido *compartido;
     int *ganancia;
     int *pedidosTerminados;
+    int *placeOpen;
 }MenuParams;
 
 
@@ -65,10 +58,8 @@ typedef struct{
     Client *clientes;
     Food *currentOrder;
     Chef *chefs;
-    int open;
     int fifo;
     mqd_t colaMensajes;
-//    pthread_mutex_t *mtx;
 }FoodPlace;
 
 #endif
