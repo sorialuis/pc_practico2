@@ -14,18 +14,7 @@
 #include <mqueue.h>
 #include "structs.h"
 
-
-//Esto va a estar aspero!
-
 //gcc -pthread  main.c -lrt
-
-//Encargado es un procceso que administra los hilos cocineros
-//Calle es un proceso que lanza hilos del tipo cliente
-
-//Process Cocineros que larga los hilos cocinero
-//Cliente es un hilo que paga con a travez de FIFO
-//Cocinero es un hilo informa por cola de mensajes al encargado
-
 
 #define TAMMSG 8192
 /* Variables globales para la alarma */
@@ -67,7 +56,7 @@ int chefDesocupado(Compartido *);
 
 int main() {
     int error=0, pid=0, childError=0, childPid=0;
-    
+
     FoodPlace *mercadoChino = (FoodPlace *)calloc(1,sizeof(FoodPlace));
     mercadoChino->chefs = (Chef*)calloc(COCINEROS,sizeof(Chef));
     mercadoChino->clientes = (Client*)calloc(CLIENTES,sizeof(Client));
@@ -99,8 +88,6 @@ int main() {
             perror("fork()");
         }
     }
-
-
 
     sleep(2);
     destroyShared(mercadoChino);
