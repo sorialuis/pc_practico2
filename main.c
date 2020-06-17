@@ -67,10 +67,7 @@ int chefDesocupado(Compartido *);
 
 int main() {
     int error=0, pid=0, childError=0, childPid=0;
-
-    //Func crear structs
-    //Func crear compartido
-
+    
     FoodPlace *mercadoChino = (FoodPlace *)calloc(1,sizeof(FoodPlace));
     mercadoChino->chefs = (Chef*)calloc(COCINEROS,sizeof(Chef));
     mercadoChino->clientes = (Client*)calloc(CLIENTES,sizeof(Client));
@@ -103,9 +100,10 @@ int main() {
         }
     }
 
+
+
     sleep(2);
-//    printf("Hola\n");
-//    sleep(10);
+    destroyShared(mercadoChino);
     return 0;
 }
 
@@ -128,29 +126,21 @@ void streetProcess(FoodPlace *mercadoChino){
     int aux = 0;
     while(placeOpen && aux < CLIENTES){
         pthread_t *cThread = (pthread_t *) calloc(1,sizeof(pthread_t));
-        Client *client = (Client*)calloc(1,sizeof(Client));
-//        client->id = aux++;
-        datos->clientes[aux].id = aux++;
-//        datos->clientes[aux].tolerance = (int*)calloc(1,sizeof(int));
-//        client->split = (SplitSemaphore_t*)calloc(1,sizeof(SplitSemaphore_t));
+
+        datos->clientes[aux].id = aux;
+
 
         datos->clientes[aux].tolerance = tolerance;
         datos->clientes[aux].order = pickFood(mercadoChino->menu);
-//        datos->clientes[aux].mtx = &datos->mtx;
+
         datos->clientes[aux].mtxClientQueue = &datos->mtxClientQueue;
         datos->clientes[aux].mtxEsperarPedido = &datos->mtxEsperaPedido;
-//        client->semQueue = mercadoChino->semQueue;
-//        client->m = mercadoChino->m;
-//        client->memoria = mercadoChino->memoria;
-//        client->split->pagar = mercadoChino->split->pagar;
-//        client->split->cobrar = mercadoChino->split->cobrar;
-//
-//        mercadoChino->clients[client->id] = *client;
+
 
         sleep(rand()%5+1);
-        datos->clientsTotal = aux;
-//        aux++;
+
         pthread_create(cThread,NULL,clientThread,(void*)&datos->clientes[aux]);
+        datos->clientsTotal = ++aux;
     }
     pthread_exit(NULL);
 }
@@ -191,8 +181,13 @@ void chefsProcess(FoodPlace *mercadoChino){
 void managerProcess(FoodPlace *mercadoChino){
 
     struct mq_attr attrCola;
-    mqd_t cola = mq_open("/colaMensajes",O_RDONLY);
-    char buf[TAMMSG];
+//    mqd_t cola = mq_open("/colaMensajes",O_RDONLY);
+    mqd_t cola = mq_open("/colaMensajes",O_RDONLY,0664,&attrCola);
+    if(cola == -1){
+        perror("mq_open managerProcess");
+    }
+
+    char buf[6];
     char nro_cliente[TAMMSG];
 
     int opt = 0;
@@ -204,7 +199,6 @@ void managerProcess(FoodPlace *mercadoChino){
     params.compartido = (Compartido *)calloc(1,sizeof(Compartido));
     params.ganancia = (int *)calloc(1,sizeof(int));
     params.pedidosTerminados = (int *)calloc(1,sizeof(int));
-
 
 
     //Memoria compartida
@@ -227,24 +221,29 @@ void managerProcess(FoodPlace *mercadoChino){
     while (!finished){
         opt = 0;
         scanf("%d",&opt);
-        /*El switch es feo... lo cambiamos ?*/
-
         if(opt == 1){
             serveClient(datos);
         }else if(opt == 2){
             //Obtengo el numero del cliente que esta esperando cobrar
-            mq_receive(cola, nro_cliente, TAMMSG, NULL);
-            printf("Cobrando al cliente %s\n",nro_cliente);
+            mq_getattr(cola, &attrCola);
 
-            //Obtengo de la fifo el pago del cliente
-            int numero = 0;
-            read(mififo,buf,sizeof(buf));
-            numero = atoi(buf);
-            ganancias = ganancias + numero;
-
-            printf("Aprete el 2\n");
+            if(attrCola.mq_curmsgs){
+                int err = 0;
+                err = mq_receive(cola, nro_cliente, TAMMSG, NULL);
+                if(err == -1){
+                    perror("Error de mq_recive");
+                }
+                printf("Cobrando al cliente %s\n",nro_cliente);
+                //Obtengo de la fifo el pago del cliente
+                int numero = 0;
+                read(mififo,buf,sizeof(buf));
+                numero = atoi(buf);
+                ganancias = ganancias + numero;
+            }else{
+                printf("Sin clientes para cobrar\n");
+            }
         }else if(opt == 3){
-
+            //cerrar
         }else {
             printf("OPCION INCORRECTA\n");
             printf("%d\n",opt);
@@ -267,7 +266,7 @@ void *menuThread(void *arg){
 
     while (!finished){
         mq_getattr(cola,&attrCola);
-//        clearScreen();
+        clearScreen();
         printf("Puerta: %s\n\n", placeOpen ? "CERRADA" : "ABIERTA");
         printf("Estados de Cocineros:\n");
         for(i = 0; i < COCINEROS; i++ ){
@@ -305,7 +304,6 @@ void *clientThread(void *arg){
     char strnum[20];
     int guardado;
 
-    printf("Nuevo cliente en cola");
 
     //Canal de envio de FIFO
     int fifoIn = 0;
@@ -332,7 +330,7 @@ void *clientThread(void *arg){
         client->tolerance = 0;
     }
     close(fifoIn);
-    //free(client);
+//    free(client);
     pthread_exit(NULL);
 
 }
@@ -351,11 +349,6 @@ void *chefThread(void *arg){
         perror("mq_open");
     }
 
-//    printf("Soy el chef %d bloqueando\n",chef->id);
-//    pthread_mutex_unlock(chef->mtx);
-//    printf("Soy el chef %d desbloqueando\n",chef->id);
-//    pthread_mutex_lock(chef->mtx);
-
     while(!finished){
         pthread_mutex_lock(chef->mtx);
         *chef->libre = 0;
@@ -364,7 +357,6 @@ void *chefThread(void *arg){
         enviado = 0;
 //        Envio por cola de mensajes
         snprintf(idCliente,10,"%d",chef->pedido->idCliente);
-        printf("ID CLIENTE %s\n",idCliente);
         enviado = mq_send(cola,idCliente,10,0);
         if(enviado == -1) {
             perror("Cola envio error");
@@ -496,6 +488,13 @@ int initShared(FoodPlace *mercadoChino){
         error = 0;
     }
 
+    //Crear ColaMensajes
+    mqd_t cola;
+    cola=mq_open("/colaMensajes",O_CREAT, 0777, NULL);
+    if (cola==-1) {
+        perror("mq_open Init");
+        error = cola;
+    }
 
     return error;
 }
@@ -538,7 +537,7 @@ void clearScreen(){
 int welcomeMenu(){
     int opt = 0;
     do {
-//        clearScreen();
+        clearScreen();
         printf("Juego Programacion Concurrente\n");
         printf("1 - Iniciar juego\n");
         printf("2 -  Salir\n");
