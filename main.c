@@ -55,6 +55,7 @@ int initShared(FoodPlace *);
 void destroyShared(FoodPlace *);
 
 void serveClient(Compartido *);
+int deliverOrder();
 
 /* Close */
 void closeFoodPlace();
@@ -65,7 +66,6 @@ int chefDesocupado(Compartido *);
 
 
 int main() {
-
     int error=0, pid=0, childError=0, childPid=0;
 
     //Func crear structs
@@ -189,7 +189,12 @@ void chefsProcess(FoodPlace *mercadoChino){
 }
 
 void managerProcess(FoodPlace *mercadoChino){
-    int error = 0;
+
+    struct mq_attr attrCola;
+    mqd_t cola = mq_open("/colaMensajes",O_RDONLY);
+    char buf[TAMMSG];
+    char nro_cliente[TAMMSG];
+
     int opt = 0;
     pthread_t menu;
     int ganancias = 0;
@@ -207,33 +212,12 @@ void managerProcess(FoodPlace *mercadoChino){
     datos = mmap(NULL, sizeof(Compartido), PROT_READ | PROT_WRITE, MAP_SHARED, mercadoChino->memoriaCompartida, 0);
     if (datos == MAP_FAILED) {
         perror("mmap()");
-        error = -1;
     }
 
     //Fifo de lectura
-    int fifoOut = 0;
-    fifoOut = open("./fifo", O_RDONLY);
-    if(fifoOut < 0) {
-        perror("fifo open");
-    }
-    char ack[4];
-    int leidos;
-//    leidos = read(fifoOut,ack,4);
+    int mififo = open("./fifo",O_RDONLY);
 
-//    if(leidos < 0) {
-//        perror("fifo read");
-//    }
 
-    //Cola de mensajes
-    int enviado;
-    char numero[TAMMSG];
-//    printf("lawea 1");
-//    enviado=mq_receive(datos->colaMensajes,numero,TAMMSG,NULL);
-//    printf("lawea 2");
-//    if (enviado==-1) {
-//        perror("mq_receive");
-//        error=enviado;
-//    }
     params.compartido = datos;
     params.ganancia = &ganancias;
     params.pedidosTerminados = &pedidosTerminados;
@@ -241,44 +225,48 @@ void managerProcess(FoodPlace *mercadoChino){
 
     //Menu del Juego
     while (!finished){
-
         opt = 0;
         scanf("%d",&opt);
         /*El switch es feo... lo cambiamos ?*/
-        switch (opt) {
-            case 1:
-                serveClient(datos);
-                printf("Opcion1\n");
-                break;
-            case 2:
-//                deliverOrder(params->mercadoChino);
-                printf("Opcion2\n");
-                break;
-            case 3:
-//                closeFoodPlace(params->mercadoChino->m);
-                closeFoodPlace();
-                printf("Opcion3\n");
-                break;
-            default:
-                printf("OPCION INCORRECTA");
+
+        if(opt == 1){
+            serveClient(datos);
+        }else if(opt == 2){
+            //Obtengo el numero del cliente que esta esperando cobrar
+            mq_receive(cola, nro_cliente, TAMMSG, NULL);
+            printf("Cobrando al cliente %s\n",nro_cliente);
+
+            //Obtengo de la fifo el pago del cliente
+            int numero = 0;
+            read(mififo,buf,sizeof(buf));
+            numero = atoi(buf);
+            ganancias = ganancias + numero;
+
+            printf("Aprete el 2\n");
+        }else if(opt == 3){
+
+        }else {
+            printf("OPCION INCORRECTA\n");
+            printf("%d\n",opt);
         }
+
+
         fflush(stdin);
     }
-    close(fifoOut);
+    close(mififo);
     pthread_exit(NULL);
 }
 
 void *menuThread(void *arg){
-    struct mq_attr parametros;
+    struct mq_attr attrCola;
+    mqd_t cola = mq_open("/colaMensajes",O_RDONLY,0664,&attrCola);
+
     MenuParams *datos = (MenuParams *) arg;
     int i= 0;
     char *status;
 
-    int ganancia = 0;
-    int terminados = 0;
-
     while (!finished){
-        mq_getattr(datos->compartido->colaMensajes,&parametros);
+        mq_getattr(cola,&attrCola);
 //        clearScreen();
         printf("Puerta: %s\n\n", placeOpen ? "ABIERTA" : "CERRADA");
         printf("Estados de Cocineros:\n");
@@ -290,21 +278,19 @@ void *menuThread(void *arg){
         }
         //Esto lo tendria que ver con la FIFO
         printf("\nClientes en cola:\n");
-//        printf("%d\n",datos->clientsTotal);
         for(i = 0; i < datos->compartido->clientsTotal; i++ ){
-//            printf("La toleranciaa %d\n",datos->clientes[i].tolerance);
             if(datos->compartido->clientes[i].tolerance){
-                printf("\tCliente %d pedido.\n",i);
-//                printf("\tCliente %d pedido %s.\n",i, params->mercadoChino->clients[i].order->name);
+//                printf("\tCliente %d pedido.\n",i);
+                printf("\tCliente %d pedido %s.\n",i, datos->compartido->clientes[i].order->name);
             }
         }
+
+
         //Ver de contar fifo
         printf("\nPedidos Terminados esperando cobrar: %ld\n",
-               parametros.mq_curmsgs);
+               attrCola.mq_curmsgs);
 
-
-
-//        printf("\nGanancias: $%d\n",*datos);
+        printf("\nGanancias: $%d\n",*datos->ganancia);
         printf("\nAcciones:\n");
         printf("\t1 - Atender Cliente\n");
         printf("\t2 - Entregar Pedido\n");
@@ -346,10 +332,6 @@ void *clientThread(void *arg){
         printf("El Cliente %d se canso de esperar\r\n",client->id);
         client->tolerance = 0;
     }
-
-
-
-
     close(fifoIn);
     //free(client);
     pthread_exit(NULL);
@@ -364,7 +346,7 @@ void *chefThread(void *arg){
     //abrir la cola de mensajes
     mqd_t cola;
     int error = 0;
-    cola=mq_open("/colaMensajes",O_WRONLY|O_CREAT,0660,NULL);
+    cola = mq_open("/colaMensajes",O_WRONLY | O_CREAT,0664, NULL);
     if (cola==-1) {
         error=cola;
         perror("mq_open");
@@ -374,7 +356,6 @@ void *chefThread(void *arg){
 //    pthread_mutex_unlock(chef->mtx);
 //    printf("Soy el chef %d desbloqueando\n",chef->id);
 //    pthread_mutex_lock(chef->mtx);
-//
 
     while(!finished){
         pthread_mutex_lock(chef->mtx);
@@ -383,8 +364,9 @@ void *chefThread(void *arg){
         sleep(chef->pedido->order.prepTime);
         enviado = 0;
 //        Envio por cola de mensajes
-        snprintf(idCliente,4,"%d",chef->pedido->idCliente);
-        enviado = mq_send(cola,idCliente,4,0);
+        snprintf(idCliente,10,"%d",chef->pedido->idCliente);
+        printf("ID CLIENTE %s\n",idCliente);
+        enviado = mq_send(cola,idCliente,TAMMSG,0);
         if(enviado == -1) {
             perror("Cola envio error");
         }
@@ -466,6 +448,7 @@ int initShared(FoodPlace *mercadoChino){
     }
     if (!error) {
         printf("Descriptor de memoria creado!\n");
+
         error = ftruncate(mercadoChino->memoriaCompartida, sizeof(Compartido));
         if (error)
             perror("ftruncate()");
@@ -514,14 +497,6 @@ int initShared(FoodPlace *mercadoChino){
         error = 0;
     }
 
-    //Crear Colar de mensajes
-    mercadoChino->colaMensajes = mq_open("/colaMensajes", O_RDWR | O_CREAT, 0777, NULL);
-    if (mercadoChino->colaMensajes == -1) {
-        perror("mq_open");
-        error = mercadoChino->colaMensajes;
-    }
-
-    datos->colaMensajes = mercadoChino->colaMensajes;
 
     return error;
 }
@@ -546,15 +521,9 @@ void destroyShared(FoodPlace *mercadoChino){
     }
 
     //Cerrra cola de mensajes
-    if(!access("/colaMensajes", F_OK)) {
-        mercadoChino->colaMensajes = mq_close(mercadoChino->colaMensajes);
-        if(mercadoChino->colaMensajes)
-            perror("mq_close");
-        mercadoChino->colaMensajes = mq_unlink("/colaMensajes");
-        if(mercadoChino->colaMensajes)
-            perror("mq_close");
-    }
-
+    mercadoChino->colaMensajes = mq_unlink("/colaMensajes");
+    if(mercadoChino->colaMensajes)
+        perror("mq_close");
 
 }
 
@@ -591,8 +560,6 @@ void serveClient(Compartido *datos){
     if(chef >= 0){
         for(int i = 0; i < datos->clientsTotal; i++ ){
             if(datos->clientes[i].tolerance){
-                //bloquear por tiempo libre de chef
-//            sem_post(mercadoChino->semQueue);
                 pthread_mutex_unlock(&datos->mtxClientQueue);
                 datos->asignado[chef].order = *datos->clientes[i].order;
                 datos->asignado[chef].idCliente = i;
@@ -600,7 +567,6 @@ void serveClient(Compartido *datos){
                 i = datos->clientsTotal;
             }
         }
-
     }
     return;
 }
@@ -614,4 +580,13 @@ int chefDesocupado(Compartido *datos){
     }
     return libre;
 
+}
+
+int deliverOrder(int mififo){
+    char buf[50];
+    int numero = 0;
+    read(mififo,buf,sizeof(buf));
+    numero = atoi(buf);
+    close(mififo);
+    return numero;
 }

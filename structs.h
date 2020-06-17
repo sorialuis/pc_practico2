@@ -50,7 +50,6 @@ typedef struct{
     int clientsTotal;
     int placeOpen, finished;
     pthread_mutex_t mtxEsperaPedido;
-    mqd_t colaMensajes;
 }Compartido;
 
 typedef struct {
